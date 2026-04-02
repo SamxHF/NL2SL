@@ -6,106 +6,166 @@ from sqlalchemy import create_engine, text
 from applications import (
     build_db_uri,
     create_sql_agent_langchain,
+    extract_sql_from_steps,
     format_query_error,
     get_gemini_client,
 )
 
 
-st.set_page_config(page_title="NSL2 Dashboard", page_icon="🧭", layout="wide")
+st.set_page_config(page_title="NL2SQL Assistant", page_icon="🗃️", layout="wide")
 
 
 def inject_styles() -> None:
     st.markdown(
         """
         <style>
+            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
             .stApp {
-                background: radial-gradient(circle at 8% 2%, #e0f2fe 0%, #f0f9ff 42%, #f8fafc 100%);
+                background: #f8f9fc;
+                font-family: 'Inter', sans-serif;
             }
 
+            /* ── Sidebar ── */
             [data-testid="stSidebar"] {
                 background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
-                border-right: 1px solid rgba(148, 163, 184, 0.25);
+                border-right: 1px solid rgba(148, 163, 184, 0.15);
             }
-
             [data-testid="stSidebar"] * {
-                color: #000000;
+                color: #e2e8f0 !important;
+            }
+            [data-testid="stSidebar"] .stButton > button {
+                width: 100%;
+                border-radius: 8px;
+                border: 1px solid rgba(148, 163, 184, 0.25);
+                background: rgba(255,255,255,0.06);
+                color: #e2e8f0 !important;
+                font-weight: 600;
+                padding: 0.5rem 1rem;
+                transition: background 0.2s;
+            }
+            [data-testid="stSidebar"] .stButton > button:hover {
+                background: rgba(255,255,255,0.12);
+                border-color: rgba(148, 163, 184, 0.4);
+            }
+            [data-testid="stSidebar"] hr {
+                border-color: rgba(148, 163, 184, 0.2) !important;
             }
 
-            .stApp, .stApp * {
-                color: #000000;
+            /* ── Hero banner ── */
+            .hero {
+                background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 50%, #0c4a6e 100%);
+                border-radius: 16px;
+                padding: 2rem 2.25rem;
+                margin-bottom: 1.25rem;
+                position: relative;
+                overflow: hidden;
             }
-
-            .hero-wrap {
-                border: 1px solid #bae6fd;
-                border-radius: 18px;
-                padding: 16px 18px;
-                background: linear-gradient(120deg, #ffffff 0%, #f8fafc 55%, #f0f9ff 100%);
-                box-shadow: 0 8px 22px rgba(14, 116, 144, 0.10);
-                margin-bottom: 10px;
+            .hero::before {
+                content: '';
+                position: absolute;
+                top: -40%; right: -10%;
+                width: 320px; height: 320px;
+                background: radial-gradient(circle, rgba(56,189,248,0.15) 0%, transparent 70%);
+                border-radius: 50%;
             }
-
-            .hero-row {
-                display: flex;
-                align-items: center;
-                gap: 14px;
-            }
-
             .hero-title {
                 margin: 0;
-                font-size: 1.55rem;
+                font-size: 1.75rem;
                 font-weight: 800;
-                letter-spacing: 0.2px;
-                color: #000000 !important;
-                line-height: 1.1;
-                text-shadow: none;
+                color: #ffffff !important;
+                letter-spacing: -0.3px;
+                line-height: 1.2;
             }
-
+            .hero-title span {
+                background: linear-gradient(90deg, #38bdf8, #818cf8);
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+            }
             .hero-sub {
-                margin: 2px 0 0 0;
-                color: #000000 !important;
-                font-size: 0.94rem;
-                font-weight: 600;
+                margin: 0.35rem 0 0 0;
+                color: #94a3b8 !important;
+                font-size: 0.95rem;
+                font-weight: 400;
+                line-height: 1.5;
             }
 
-            .status-wrap {
+            /* ── Status bar ── */
+            .status-bar {
                 display: flex;
-                gap: 10px;
+                gap: 8px;
                 flex-wrap: wrap;
-                margin: 8px 0 14px 0;
+                margin-bottom: 1.25rem;
             }
-
-            .status-pill {
+            .pill {
+                display: inline-flex;
+                align-items: center;
+                gap: 6px;
                 border-radius: 999px;
-                padding: 6px 10px;
-                font-size: 0.82rem;
-                border: 1px solid #7dd3fc;
-                background: #fff;
-                color: #000000;
+                padding: 5px 14px;
+                font-size: 0.8rem;
+                font-weight: 600;
+                border: 1px solid #e2e8f0;
+                background: #ffffff;
+                color: #475569;
+            }
+            .pill .dot {
+                width: 7px; height: 7px;
+                border-radius: 50%;
+                display: inline-block;
+            }
+            .pill .dot.green  { background: #22c55e; box-shadow: 0 0 6px rgba(34,197,94,0.45); }
+            .pill .dot.red    { background: #ef4444; box-shadow: 0 0 6px rgba(239,68,68,0.4); }
+            .pill .dot.blue   { background: #3b82f6; box-shadow: 0 0 6px rgba(59,130,246,0.35); }
+            .pill .dot.amber  { background: #f59e0b; box-shadow: 0 0 6px rgba(245,158,11,0.35); }
+
+            /* ── Welcome / example cards ── */
+            .welcome-section {
+                text-align: center;
+                padding: 2.5rem 1rem 1rem;
+            }
+            .welcome-icon {
+                font-size: 2.5rem;
+                margin-bottom: 0.5rem;
+            }
+            .welcome-heading {
+                font-size: 1.2rem;
+                font-weight: 700;
+                color: #1e293b !important;
+                margin: 0 0 0.25rem;
+            }
+            .welcome-text {
+                color: #64748b !important;
+                font-size: 0.9rem;
+                margin: 0 0 1.75rem;
             }
 
+            /* ── Chat messages ── */
             .stChatMessage {
                 border-radius: 14px;
-                border: 1px solid #cbd5e1;
-                background: rgba(255, 255, 255, 0.86);
-                box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
+                border: 1px solid #e2e8f0;
+                background: #ffffff;
+                box-shadow: 0 1px 4px rgba(15,23,42,0.04);
             }
 
-            .stButton > button {
+            /* ── Main-area buttons ── */
+            .stApp > section > div .stButton > button {
                 border-radius: 10px;
-                border: 1px solid #93c5fd;
-                background: linear-gradient(90deg, #0ea5e9 0%, #06b6d4 100%);
-                color: #ffffff;
+                border: 1px solid #c7d2fe;
+                background: linear-gradient(135deg, #6366f1 0%, #818cf8 100%);
+                color: #ffffff !important;
                 font-weight: 600;
+                padding: 0.45rem 1rem;
+                transition: opacity 0.2s;
+            }
+            .stApp > section > div .stButton > button:hover {
+                opacity: 0.9;
             }
 
-            .stButton > button:hover {
-                border-color: #38bdf8;
-                background: linear-gradient(90deg, #0284c7 0%, #0891b2 100%);
-            }
-
+            /* ── Chat input ── */
             .stChatInputContainer {
-                border-top: 1px solid #cbd5e1;
-                background: rgba(248, 250, 252, 0.95);
+                border-top: 1px solid #e2e8f0;
+                background: rgba(248,250,252,0.95);
             }
         </style>
         """,
@@ -113,16 +173,12 @@ def inject_styles() -> None:
     )
 
 
-def render_logo_header() -> None:
+def render_hero() -> None:
     st.markdown(
-        f"""
-        <div class="hero-wrap">
-            <div class="hero-row">
-                <div>
-                    <h1 class="hero-title">NSL2 Dashboard</h1>
-                    <p class="hero-sub">Natural language to SQL for your course database with a cleaner chat experience.</p>
-                </div>
-            </div>
+        """
+        <div class="hero">
+            <h1 class="hero-title">🗃️ NL2SQL <span>Assistant</span></h1>
+            <p class="hero-sub">Ask questions in plain English — get instant SQL results from your course database.</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -135,7 +191,7 @@ def check_db_connection(db_uri: str) -> tuple[bool, str]:
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
         return True, "Connected"
-    except Exception as exc:  # pragma: no cover
+    except Exception as exc:
         return False, str(exc)
 
 
@@ -159,80 +215,142 @@ def get_config_warnings() -> list[str]:
     return warnings
 
 
-def run_query(question: str) -> str:
+def _build_conversation_context(messages: list, max_turns: int = 5) -> str:
+    """Return a summary of the last *max_turns* Q&A pairs so the agent
+    can understand follow-up questions."""
+    recent = messages[-(max_turns * 2):]
+    if not recent:
+        return ""
+    lines = []
+    for msg in recent:
+        role = "User" if msg["role"] == "user" else "Assistant"
+        text_content = msg["content"]
+        if len(text_content) > 300:
+            text_content = text_content[:300] + "…"
+        lines.append(f"{role}: {text_content}")
+    return (
+        "Here is the recent conversation for context. "
+        "Use it to understand follow-up questions:\n"
+        + "\n".join(lines)
+        + "\n\nNow answer the following question:\n"
+    )
+
+
+def run_query(question: str, history: list) -> dict:
+    """Run a question through the agent with conversation context.
+    Returns {"answer": str, "sql": str | None}."""
     _, agent = init_agent()
+    context = _build_conversation_context(history)
+    full_input = context + question.strip() if context else question.strip()
     try:
-        response = agent.invoke({"input": question.strip()})
-        return response.get("output", "No response generated")
+        response = agent.invoke({"input": full_input})
+        answer = response.get("output", "No response generated")
+        steps = response.get("intermediate_steps", [])
+        queries = extract_sql_from_steps(steps) if steps else []
+        return {"answer": answer, "sql": queries[-1] if queries else None}
     except Exception as exc:
-        return format_query_error(exc)
+        return {"answer": format_query_error(exc), "sql": None}
+
+
+def render_assistant_message(msg: dict) -> None:
+    """Render an assistant message, showing the SQL block when available."""
+    if msg.get("sql"):
+        st.caption("Generated SQL")
+        st.code(msg["sql"], language="sql")
+    st.markdown(msg["content"])
+
+
+EXAMPLES = [
+    {"icon": "📋", "title": "List all courses", "desc": "Show every course in the catalog", "prompt": "List all courses"},
+    {"icon": "🔍", "title": "Unenrolled students", "desc": "Find students not in any course", "prompt": "Which students are not enrolled in any course?"},
+    {"icon": "📊", "title": "Enrollments per course", "desc": "Count students in each course", "prompt": "How many students are enrolled in each course?"},
+]
 
 
 def main() -> None:
     inject_styles()
-    render_logo_header()
+    render_hero()
 
+    # ── Sidebar ──
     with st.sidebar:
-        st.subheader("Control Panel")
-        st.write("Model:", "gemini-2.5-flash")
-        st.write("Mode:", "Read-only queries")
+        st.markdown("#### ⚙️ Control Panel")
+        st.caption("Model")
+        st.code("gemini-2.5-flash", language=None)
+        st.caption("Query Mode")
+        st.code("Read-only (SELECT only)", language=None)
+        st.divider()
 
         config_warnings = get_config_warnings()
         if config_warnings:
-            st.warning("Configuration is incomplete")
+            st.warning("Configuration incomplete")
             for item in config_warnings:
-                st.write(f"- {item}")
+                st.markdown(f"- {item}")
         else:
-            st.success("Configuration looks good")
+            st.success("All systems configured")
 
-        if st.button("Reload Agent"):
+        st.divider()
+        if st.button("🔄  Reload Agent"):
             init_agent.clear()
             st.rerun()
-
-        if st.button("Clear Chat"):
+        if st.button("🗑️  Clear Chat"):
             st.session_state.messages = []
             st.rerun()
 
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
-
+    # ── Status bar ──
     db_uri = build_db_uri()
     ok, status = check_db_connection(db_uri)
-    db_state = "DB: Online" if ok else "DB: Offline"
-    db_tone = "Connected" if ok else "Unavailable"
+    db_dot = "green" if ok else "red"
+    db_label = "Database Online" if ok else "Database Offline"
     st.markdown(
         f"""
-        <div class="status-wrap">
-            <span class="status-pill">{db_state}</span>
-            <span class="status-pill">Model: Gemini 2.5 Flash</span>
-            <span class="status-pill">Safety: Read-only</span>
-            <span class="status-pill">Status: {db_tone}</span>
+        <div class="status-bar">
+            <span class="pill"><span class="dot {db_dot}"></span>{db_label}</span>
+            <span class="pill"><span class="dot blue"></span>Gemini 2.5 Flash</span>
+            <span class="pill"><span class="dot green"></span>Read-only Mode</span>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
     if not ok:
-        st.info("Database is currently unavailable. You can still chat, but query execution will fail until DB is up.")
+        st.info("Database is currently unavailable. You can still chat, but queries will fail until the DB is up.")
         with st.expander("Connection details"):
             st.code(status)
 
-    if not st.session_state.messages:
-        st.markdown("Try one of these:")
-        ex1, ex2, ex3 = st.columns(3)
-        if ex1.button("List all courses"):
-            st.session_state.pending_prompt = "List all courses"
-        if ex2.button("Students not enrolled"):
-            st.session_state.pending_prompt = "Which students are not enrolled in any course?"
-        if ex3.button("Enrollments per course"):
-            st.session_state.pending_prompt = "How many students are enrolled in each course?"
+    # ── Session state ──
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
 
+    # ── Welcome screen with example cards ──
+    if not st.session_state.messages:
+        st.markdown(
+            """
+            <div class="welcome-section">
+                <div class="welcome-icon">💬</div>
+                <p class="welcome-heading">What would you like to know?</p>
+                <p class="welcome-text">Ask any question about your database in plain English, or try one of these examples:</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        cols = st.columns(len(EXAMPLES))
+        for col, ex in zip(cols, EXAMPLES):
+            with col:
+                if st.button(f"{ex['icon']}  {ex['title']}", key=ex["title"], use_container_width=True):
+                    st.session_state.pending_prompt = ex["prompt"]
+                    st.rerun()
+
+    # ── Chat history ──
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
+            if msg["role"] == "assistant":
+                render_assistant_message(msg)
+            else:
+                st.markdown(msg["content"])
 
+    # ── Input handling ──
     pending = st.session_state.pop("pending_prompt", None) if "pending_prompt" in st.session_state else None
-    question = pending or st.chat_input("Ask a database question...")
+    question = pending or st.chat_input("Ask a question about your database…")
 
     if question:
         st.session_state.messages.append({"role": "user", "content": question})
@@ -240,11 +358,18 @@ def main() -> None:
             st.markdown(question)
 
         with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
-                output = run_query(question)
-            st.markdown(output)
+            with st.spinner("Querying…"):
+                result = run_query(question, st.session_state.messages[:-1])
+            if result["sql"]:
+                st.caption("Generated SQL")
+                st.code(result["sql"], language="sql")
+            st.markdown(result["answer"])
 
-        st.session_state.messages.append({"role": "assistant", "content": output})
+        st.session_state.messages.append({
+            "role": "assistant",
+            "content": result["answer"],
+            "sql": result["sql"],
+        })
 
 
 if __name__ == "__main__":

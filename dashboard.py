@@ -3,7 +3,12 @@ import os
 import streamlit as st
 from sqlalchemy import create_engine, text
 
-from applications import build_db_uri, create_sql_agent_langchain, get_gemini_client
+from applications import (
+    build_db_uri,
+    create_sql_agent_langchain,
+    format_query_error,
+    get_gemini_client,
+)
 
 
 st.set_page_config(page_title="NSL2 Dashboard", page_icon="🧭", layout="wide")
@@ -156,8 +161,11 @@ def get_config_warnings() -> list[str]:
 
 def run_query(question: str) -> str:
     _, agent = init_agent()
-    response = agent.invoke({"input": question.strip()})
-    return response.get("output", "No response generated")
+    try:
+        response = agent.invoke({"input": question.strip()})
+        return response.get("output", "No response generated")
+    except Exception as exc:
+        return format_query_error(exc)
 
 
 def main() -> None:
@@ -233,10 +241,7 @@ def main() -> None:
 
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
-                try:
-                    output = run_query(question)
-                except Exception as exc:
-                    output = f"Query failed: {exc}"
+                output = run_query(question)
             st.markdown(output)
 
         st.session_state.messages.append({"role": "assistant", "content": output})

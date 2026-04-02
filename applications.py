@@ -8,9 +8,9 @@ from google import genai
 # LangChain imports
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_community.utilities import SQLDatabase
-from langchain.agents import create_sql_agent, AgentType
-from langchain.agents.agent_toolkits import SQLDatabaseToolkit
-from langchain.callbacks import StreamlitCallbackHandler
+from langchain_community.agent_toolkits.sql.base import create_sql_agent
+from langchain_community.agent_toolkits.sql.toolkit import SQLDatabaseToolkit
+from langchain_community.callbacks.streamlit import StreamlitCallbackHandler
 
 load_dotenv()
 
@@ -59,13 +59,33 @@ def create_sql_agent_langchain(db_uri: str, llm):
     agent = create_sql_agent(
         llm=llm,
         toolkit=toolkit,
-        agent_type=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
         verbose=True,
         handle_parsing_errors=True,
         max_iterations=10
     )
     
     return agent
+
+
+def format_query_error(exc: Exception) -> str:
+    """Convert LLM and database failures into short user-facing messages."""
+    code = getattr(exc, "code", None)
+    status = str(getattr(exc, "status", "")).upper()
+    message = str(exc)
+    upper_message = message.upper()
+
+    if code == 429 or status == "RESOURCE_EXHAUSTED" or "RESOURCE_EXHAUSTED" in upper_message:
+        retry_match = re.search(r"retry in ([0-9]+(?:\.[0-9]+)?)s", message, re.IGNORECASE)
+        retry_text = " in a few seconds"
+        if retry_match:
+            retry_seconds = retry_match.group(1)
+            retry_text = f" in about {retry_seconds} seconds"
+        return (
+            "Gemini quota is temporarily exhausted. "
+            f"Please try again{retry_text}, or switch to a different API key/model if this keeps happening."
+        )
+
+    return message
 
 
 def get_model_name() -> str:
@@ -237,7 +257,7 @@ def main():
             print(str(e))
         except Exception as e:
             print("\n[Error]")
-            print(str(e))
+            print(format_query_error(e))
 
 
 if __name__ == "__main__":

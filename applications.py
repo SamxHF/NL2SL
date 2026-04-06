@@ -230,7 +230,7 @@ def main():
     llm = get_gemini_client()
 
     print("=" * 60)
-    print("NL2SQL Starter (Gemini + MySQL)")
+    print("NL2SQL with LangChain (Gemini + MySQL)")
     print("Type 'exit' to quit.")
     print("=" * 60)
 
@@ -254,6 +254,7 @@ def main():
             continue
 
         try:
+            print("\n[LangChain Processing...]")
             result = agent.invoke({"input": question})
 
             steps = result.get("intermediate_steps", [])

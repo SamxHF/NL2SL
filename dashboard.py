@@ -6,6 +6,7 @@ from sqlalchemy import create_engine, text
 from applications import (
     build_db_uri,
     create_sql_agent_langchain,
+    extract_last_query_result_from_steps,
     extract_sql_from_steps,
     format_query_error,
     get_gemini_client,
@@ -215,41 +216,24 @@ def get_config_warnings() -> list[str]:
     return warnings
 
 
-def _build_conversation_context(messages: list, max_turns: int = 5) -> str:
-    """Return a summary of the last *max_turns* Q&A pairs so the agent
-    can understand follow-up questions."""
-    recent = messages[-(max_turns * 2):]
-    if not recent:
-        return ""
-    lines = []
-    for msg in recent:
-        role = "User" if msg["role"] == "user" else "Assistant"
-        text_content = msg["content"]
-        if len(text_content) > 300:
-            text_content = text_content[:300] + "…"
-        lines.append(f"{role}: {text_content}")
-    return (
-        "Here is the recent conversation for context. "
-        "Use it to understand follow-up questions:\n"
-        + "\n".join(lines)
-        + "\n\nNow answer the following question:\n"
-    )
-
-
-def run_query(question: str, history: list) -> dict:
-    """Run a question through the agent with conversation context.
-    Returns {"answer": str, "sql": str | None}."""
+def run_query(question: str) -> dict:
+    """Run a question through the agent.
+    Returns {"answer": str, "sql": str | None, "execution_result": str | None}.
+    """
     _, agent = init_agent()
-    context = _build_conversation_context(history)
-    full_input = context + question.strip() if context else question.strip()
     try:
-        response = agent.invoke({"input": full_input})
+        response = agent.invoke({"input": question.strip()})
         answer = response.get("output", "No response generated")
         steps = response.get("intermediate_steps", [])
         queries = extract_sql_from_steps(steps) if steps else []
-        return {"answer": answer, "sql": queries[-1] if queries else None}
+        execution_result = extract_last_query_result_from_steps(steps) if steps else None
+        return {
+            "answer": answer,
+            "sql": queries[-1] if queries else None,
+            "execution_result": execution_result,
+        }
     except Exception as exc:
-        return {"answer": format_query_error(exc), "sql": None}
+        return {"answer": format_query_error(exc), "sql": None, "execution_result": None}
 
 
 def render_assistant_message(msg: dict) -> None:
@@ -257,6 +241,9 @@ def render_assistant_message(msg: dict) -> None:
     if msg.get("sql"):
         st.caption("Generated SQL")
         st.code(msg["sql"], language="sql")
+    if msg.get("execution_result"):
+        st.caption("Execution Result")
+        st.code(msg["execution_result"], language=None)
     st.markdown(msg["content"])
 
 
@@ -359,16 +346,20 @@ def main() -> None:
 
         with st.chat_message("assistant"):
             with st.spinner("Querying…"):
-                result = run_query(question, st.session_state.messages[:-1])
+                result = run_query(question)
             if result["sql"]:
                 st.caption("Generated SQL")
                 st.code(result["sql"], language="sql")
+            if result["execution_result"]:
+                st.caption("Execution Result")
+                st.code(result["execution_result"], language=None)
             st.markdown(result["answer"])
 
         st.session_state.messages.append({
             "role": "assistant",
             "content": result["answer"],
             "sql": result["sql"],
+            "execution_result": result["execution_result"],
         })
 
 

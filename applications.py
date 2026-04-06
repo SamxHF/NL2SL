@@ -84,7 +84,7 @@ def create_sql_agent_langchain(db_uri: str, llm):
         toolkit=toolkit,
         verbose=True,
         handle_parsing_errors=True,
-        max_iterations=10,
+        max_iterations=5,
         prefix=AGENT_PREFIX,
         agent_executor_kwargs={"return_intermediate_steps": True},
     )
@@ -101,6 +101,14 @@ def extract_sql_from_steps(steps: list) -> list[str]:
                 inp = inp.get("query", str(inp))
             queries.append(str(inp).strip())
     return queries
+
+
+def extract_last_query_result_from_steps(steps: list) -> str | None:
+    """Return the observation from the last sql_db_query tool call."""
+    for action, observation in reversed(steps):
+        if action.tool == "sql_db_query":
+            return str(observation).strip()
+    return None
 
 
 def format_query_error(exc: Exception) -> str:
@@ -251,8 +259,11 @@ def main():
 
             steps = result.get("intermediate_steps", [])
             queries = extract_sql_from_steps(steps)
+            execution_result = extract_last_query_result_from_steps(steps)
             if queries:
                 print(f"\n[Generated SQL]\n{queries[-1]}")
+            if execution_result:
+                print(f"\n[Execution Result]\n{execution_result}")
 
             print("\n[Agent Response]")
             print(result.get("output", "No response generated"))

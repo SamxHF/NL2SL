@@ -1,0 +1,6 @@
+# Default to light theme so main content text is dark (readable on #f8f9fc).
+# Users can still switch theme in the app menu.
+
+[theme]
+base = "light"
+primaryColor = "#6366f1"

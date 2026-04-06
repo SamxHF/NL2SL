@@ -230,7 +230,7 @@ def main():
     llm = get_gemini_client()
 
     print("=" * 60)
-    print("NL2SQL with LangChain (Gemini + MySQL)")
+    print("NL2SQL Starter (Gemini + MySQL)")
     print("Type 'exit' to quit.")
     print("=" * 60)
 
@@ -254,18 +254,17 @@ def main():
             continue
 
         try:
-            print("\n[LangChain Processing...]")
             result = agent.invoke({"input": question})
 
             steps = result.get("intermediate_steps", [])
             queries = extract_sql_from_steps(steps)
-            execution_result = extract_last_query_result_from_steps(steps)
+            query_result = extract_last_query_result_from_steps(steps)
             if queries:
                 print(f"\n[Generated SQL]\n{queries[-1]}")
-            if execution_result:
-                print(f"\n[Execution Result]\n{execution_result}")
+            if query_result:
+                print(f"\n[Query Result]\n{query_result}")
 
-            print("\n[Agent Response]")
+            print(f"\n[Final Answer]")
             print(result.get("output", "No response generated"))
 
         except SQLAlchemyError as e:

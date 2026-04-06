@@ -226,24 +226,26 @@ def run_query(question: str) -> dict:
         answer = response.get("output", "No response generated")
         steps = response.get("intermediate_steps", [])
         queries = extract_sql_from_steps(steps) if steps else []
-        execution_result = extract_last_query_result_from_steps(steps) if steps else None
+        query_result = extract_last_query_result_from_steps(steps) if steps else None
         return {
             "answer": answer,
             "sql": queries[-1] if queries else None,
-            "execution_result": execution_result,
+            "query_result": query_result,
         }
     except Exception as exc:
-        return {"answer": format_query_error(exc), "sql": None, "execution_result": None}
+        return {"answer": format_query_error(exc), "sql": None, "query_result": None}
 
 
 def render_assistant_message(msg: dict) -> None:
-    """Render an assistant message, showing the SQL block when available."""
+    """Render an assistant message matching the CLI format:
+    [Generated SQL] → [Query Result] → [Final Answer]"""
     if msg.get("sql"):
         st.caption("Generated SQL")
         st.code(msg["sql"], language="sql")
-    if msg.get("execution_result"):
-        st.caption("Execution Result")
-        st.code(msg["execution_result"], language=None)
+    if msg.get("query_result"):
+        st.caption("Query Result")
+        st.code(msg["query_result"], language=None)
+    st.caption("Final Answer")
     st.markdown(msg["content"])
 
 
@@ -350,16 +352,17 @@ def main() -> None:
             if result["sql"]:
                 st.caption("Generated SQL")
                 st.code(result["sql"], language="sql")
-            if result["execution_result"]:
-                st.caption("Execution Result")
-                st.code(result["execution_result"], language=None)
+            if result["query_result"]:
+                st.caption("Query Result")
+                st.code(result["query_result"], language=None)
+            st.caption("Final Answer")
             st.markdown(result["answer"])
 
         st.session_state.messages.append({
             "role": "assistant",
             "content": result["answer"],
             "sql": result["sql"],
-            "execution_result": result["execution_result"],
+            "query_result": result["query_result"],
         })
 
 
